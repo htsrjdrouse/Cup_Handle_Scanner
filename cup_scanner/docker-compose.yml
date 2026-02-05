@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3005:3005"
+    networks:
+      - cup-scanner-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3006:80"
+    networks:
+      - cup-scanner-network
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+networks:
+  cup-scanner-network:
+    driver: bridge

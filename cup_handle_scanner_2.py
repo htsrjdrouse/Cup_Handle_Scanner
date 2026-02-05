@@ -1,0 +1,1940 @@
+# -*- coding: utf-8 -*-
+# cup_handle_scanner_2.py
+# Enhanced Cup & Handle Scanner with Advanced Pattern Detection
+# Requirements: pip install flask yfinance pandas pandas_ta requests beautifulsoup4 scipy matplotlib
+
+from flask import Flask, render_template_string, request, Response
+import yfinance as yf
+import pandas as pd
+import pandas_ta as ta
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
+from scipy.signal import argrelextrema
+from scipy.stats import linregress
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from io import BytesIO
+import base64
+import json
+import re
+
+app = Flask(__name__)
+
+# ════════════════════════════════════════════════════════════════
+# TICKER FETCHING FUNCTIONS
+# ════════════════════════════════════════════════════════════════
+
+# Hardcoded S&P 500 list (reliable fallback, updated Jan 2026)
+SP500_TICKERS = [
+    "AAPL", "ABBV", "ABT", "ACN", "ADBE", "ADI", "ADM", "ADP", "ADSK", "AEE", "AEP", "AES", "AFL", "AIG", "AIZ",
+    "AJG", "AKAM", "ALB", "ALGN", "ALL", "ALLE", "AMAT", "AMCR", "AMD", "AME", "AMGN", "AMP", "AMT", "AMZN",
+    "ANET", "ANSS", "AON", "AOS", "APA", "APD", "APH", "APTV", "ARE", "ATO", "AVB", "AVGO", "AVY", "AWK", "AXON",
+    "AXP", "AZO", "BA", "BAC", "BALL", "BAX", "BBWI", "BBY", "BDX", "BEN", "BF.B", "BG", "BIIB", "BIO", "BK",
+    "BKNG", "BKR", "BLDR", "BLK", "BMY", "BR", "BRK.B", "BRO", "BSX", "BWA", "BX", "BXP", "C", "CAG", "CAH",
+    "CARR", "CAT", "CB", "CBOE", "CBRE", "CCI", "CCL", "CDNS", "CDW", "CE", "CEG", "CF", "CFG", "CHD", "CHRW",
+    "CHTR", "CI", "CINF", "CL", "CLX", "CMA", "CMCSA", "CME", "CMG", "CMI", "CMS", "CNC", "CNP", "COF", "COO",
+    "COP", "COR", "COST", "CPAY", "CPB", "CPRT", "CPT", "CRL", "CRM", "CSCO", "CSGP", "CSX", "CTAS", "CTLT",
+    "CTRA", "CTSH", "CTVA", "CVS", "CVX", "CZR", "D", "DAL", "DD", "DE", "DECK", "DFS", "DG", "DGX", "DHI",
+    "DHR", "DIS", "DLR", "DLTR", "DOC", "DOV", "DOW", "DPZ", "DRI", "DTE", "DUK", "DVA", "DVN", "DXCM", "EA",
+    "EBAY", "ECL", "ED", "EFX", "EG", "EIX", "EL", "ELV", "EMN", "EMR", "ENPH", "EOG", "EPAM", "EQIX", "EQR",
+    "EQT", "ES", "ESS", "ETN", "ETR", "ETSY", "EVRG", "EW", "EXC", "EXPD", "EXPE", "EXR", "F", "FANG", "FAST",
+    "FCX", "FDS", "FDX", "FE", "FFIV", "FI", "FICO", "FIS", "FITB", "FLT", "FMC", "FOX", "FOXA", "FRT", "FSLR",
+    "FTNT", "FTV", "GD", "GDDY", "GE", "GEHC", "GEN", "GEV", "GILD", "GIS", "GL", "GLW", "GM", "GNRC", "GOOG",
+    "GOOGL", "GPC", "GPN", "GRMN", "GS", "GWW", "HAL", "HAS", "HBAN", "HCA", "HD", "HES", "HIG", "HII", "HLT",
+    "HOLX", "HON", "HPE", "HPQ", "HRL", "HSIC", "HST", "HSY", "HUBB", "HUM", "HWM", "IBM", "ICE", "IDXX", "IEX",
+    "IFF", "ILMN", "INCY", "INTC", "INTU", "INVH", "IP", "IPG", "IQV", "IR", "IRM", "ISRG", "IT", "ITW", "IVZ",
+    "J", "JBHT", "JBL", "JCI", "JKHY", "JNJ", "JNPR", "JPM", "K", "KDP", "KEY", "KEYS", "KHC", "KIM", "KKR",
+    "KLAC", "KMB", "KMI", "KMX", "KO", "KR", "KVUE", "L", "LDOS", "LEN", "LH", "LHX", "LIN", "LKQ", "LLY",
+    "LMT", "LNT", "LOW", "LRCX", "LULU", "LUV", "LVS", "LW", "LYB", "LYV", "MA", "MAA", "MAR", "MAS", "MCD",
+    "MCHP", "MCK", "MCO", "MDLZ", "MDT", "MET", "META", "MGM", "MHK", "MKC", "MKTX", "MLM", "MMC", "MMM", "MNST",
+    "MO", "MOH", "MOS", "MPC", "MPWR", "MRK", "MRNA", "MRO", "MS", "MSCI", "MSFT", "MSI", "MTB", "MTCH", "MTD",
+    "MU", "NCLH", "NDAQ", "NDSN", "NEE", "NEM", "NFLX", "NI", "NKE", "NOC", "NOW", "NRG", "NSC", "NTAP", "NTRS",
+    "NUE", "NVDA", "NVR", "NWS", "NWSA", "NXPI", "O", "ODFL", "OKE", "OMC", "ON", "ORCL", "ORLY", "OTIS", "OXY",
+    "PANW", "PARA", "PAYC", "PAYX", "PCAR", "PCG", "PEG", "PEP", "PFE", "PFG", "PG", "PGR", "PH", "PHM", "PKG",
+    "PLD", "PLTR", "PM", "PNC", "PNR", "PNW", "PODD", "POOL", "PPG", "PPL", "PRU", "PSA", "PSX", "PTC", "PWR",
+    "PYPL", "QCOM", "QRVO", "RCL", "REG", "REGN", "RF", "RJF", "RL", "RMD", "ROK", "ROL", "ROP", "ROST", "RSG",
+    "RTX", "RVTY", "SBAC", "SBUX", "SCHW", "SHW", "SJM", "SLB", "SMCI", "SNA", "SNPS", "SO", "SOLV", "SPG",
+    "SPGI", "SRE", "STE", "STLD", "STT", "STX", "STZ", "SWK", "SWKS", "SYF", "SYK", "SYY", "T", "TAP", "TDG",
+    "TDY", "TECH", "TEL", "TER", "TFC", "TFX", "TGT", "TJX", "TMO", "TMUS", "TPR", "TRGP", "TRMB", "TROW",
+    "TRV", "TSCO", "TSLA", "TSN", "TT", "TTWO", "TXN", "TXT", "TYL", "UAL", "UBER", "UDR", "UHS", "ULTA", "UNH",
+    "UNP", "UPS", "URI", "USB", "V", "VICI", "VLO", "VLTO", "VMC", "VRSK", "VRSN", "VRTX", "VST", "VTR", "VTRS",
+    "VZ", "WAB", "WAT", "WBA", "WBD", "WDC", "WEC", "WELL", "WFC", "WM", "WMB", "WMT", "WRB", "WST", "WTW", "WY",
+    "WYNN", "XEL", "XOM", "XYL", "YUM", "ZBH", "ZBRA", "ZTS"
+]
+
+def get_sp500_tickers():
+    """Get S&P 500 tickers - try GitHub CSV first, fallback to hardcoded list."""
+    # Try datahub.io maintained list
+    try:
+        url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            import io
+            df = pd.read_csv(io.StringIO(response.text))
+            tickers = df['Symbol'].tolist()
+            print(f"Fetched {len(tickers)} S&P 500 tickers from GitHub")
+            return tickers
+    except Exception as e:
+        print(f"GitHub S&P 500 fetch failed: {e}")
+    
+    # Fallback to hardcoded list
+    print(f"Using hardcoded S&P 500 list ({len(SP500_TICKERS)} tickers)")
+    return SP500_TICKERS.copy()
+
+
+def get_nasdaq_tickers(min_market_cap=1_000_000_000):
+    try:
+        url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000&exchange=NASDAQ"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=30)
+        data = response.json()
+
+        tickers = []
+        if 'data' in data and 'table' in data['data'] and 'rows' in data['data']['table']:
+            for row in data['data']['table']['rows']:
+                symbol = row.get('symbol', '')
+                market_cap_str = row.get('marketCap', '0')
+                try:
+                    market_cap = int(market_cap_str.replace(',', '')) if market_cap_str else 0
+                except:
+                    market_cap = 0
+                if (symbol and '^' not in symbol and '/' not in symbol
+                    and len(symbol) <= 5 and market_cap >= min_market_cap):
+                    tickers.append(symbol)
+
+        print(f"Fetched {len(tickers)} NASDAQ tickers with market cap >= ${min_market_cap/1e9:.0f}B")
+        return tickers if tickers else get_sp500_tickers()
+    except Exception as e:
+        print(f"Error fetching NASDAQ list: {e}")
+        return get_sp500_tickers()
+
+
+def get_nyse_tickers(min_market_cap=1_000_000_000):
+    try:
+        url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=5000&exchange=NYSE"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=30)
+        data = response.json()
+
+        tickers = []
+        if 'data' in data and 'table' in data['data'] and 'rows' in data['data']['table']:
+            for row in data['data']['table']['rows']:
+                symbol = row.get('symbol', '')
+                market_cap_str = row.get('marketCap', '0')
+                try:
+                    market_cap = int(market_cap_str.replace(',', '')) if market_cap_str else 0
+                except:
+                    market_cap = 0
+                if (symbol and '^' not in symbol and '/' not in symbol
+                    and len(symbol) <= 5 and market_cap >= min_market_cap):
+                    tickers.append(symbol)
+
+        print(f"Fetched {len(tickers)} NYSE tickers with market cap >= ${min_market_cap/1e9:.0f}B")
+        return tickers
+    except Exception as e:
+        print(f"Error fetching NYSE list: {e}")
+        return []
+
+
+def get_all_us_tickers(min_market_cap=1_000_000_000):
+    nasdaq = get_nasdaq_tickers(min_market_cap)
+    nyse = get_nyse_tickers(min_market_cap)
+    all_tickers = list(set(nasdaq + nyse))
+    print(f"Total US tickers (${min_market_cap/1e9:.0f}B+ market cap): {len(all_tickers)}")
+    return all_tickers
+
+
+# ════════════════════════════════════════════════════════════════
+# COMPANY INFO
+# ════════════════════════════════════════════════════════════════
+
+def get_company_info(symbol):
+    """Get detailed company information."""
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        
+        return {
+            'name': info.get('longName', info.get('shortName', symbol)),
+            'sector': info.get('sector', 'N/A'),
+            'industry': info.get('industry', 'N/A'),
+            'exchange': info.get('exchange', 'N/A'),
+            'market_cap': info.get('marketCap', 0),
+            'market_cap_fmt': format_market_cap(info.get('marketCap', 0)),
+            'description': info.get('longBusinessSummary', 'No description available.'),
+            'website': info.get('website', ''),
+            'employees': info.get('fullTimeEmployees', 'N/A'),
+            'country': info.get('country', 'N/A'),
+            'current_price': info.get('currentPrice', info.get('regularMarketPrice', 0)),
+            'fifty_two_week_high': info.get('fiftyTwoWeekHigh', 0),
+            'fifty_two_week_low': info.get('fiftyTwoWeekLow', 0),
+            'avg_volume': info.get('averageVolume', 0),
+            'pe_ratio': info.get('trailingPE', None),
+            'forward_pe': info.get('forwardPE', None),
+            'dividend_yield': info.get('dividendYield', None),
+            'beta': info.get('beta', None),
+        }
+    except Exception as e:
+        print(f"Error getting company info for {symbol}: {e}")
+        return {
+            'name': symbol,
+            'sector': 'N/A',
+            'industry': 'N/A',
+            'exchange': 'N/A',
+            'market_cap': 0,
+            'market_cap_fmt': 'N/A',
+            'description': 'Unable to fetch company information.',
+            'website': '',
+            'employees': 'N/A',
+            'country': 'N/A',
+            'current_price': 0,
+        }
+
+
+def format_market_cap(value):
+    """Format market cap in human readable form."""
+    if not value or value == 0:
+        return 'N/A'
+    if value >= 1e12:
+        return f"${value/1e12:.2f}T"
+    elif value >= 1e9:
+        return f"${value/1e9:.2f}B"
+    elif value >= 1e6:
+        return f"${value/1e6:.2f}M"
+    else:
+        return f"${value:,.0f}"
+
+
+# ════════════════════════════════════════════════════════════════
+# SOCIAL MEDIA SENTIMENT
+# ════════════════════════════════════════════════════════════════
+
+def get_social_sentiment(symbol):
+    """Get social media mentions and sentiment from various sources."""
+    sentiment = {
+        'reddit_mentions': 0,
+        'reddit_sentiment': 'N/A',
+        'twitter_mentions': 0,
+        'twitter_sentiment': 'N/A',
+        'stocktwits_sentiment': 'N/A',
+        'news_sentiment': 'N/A',
+    }
+    
+    # Try to get Reddit mentions from pushshift or similar
+    try:
+        # Search Reddit via web
+        reddit_url = f"https://www.reddit.com/search.json?q={symbol}%20stock&sort=new&limit=25&t=week"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(reddit_url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            posts = data.get('data', {}).get('children', [])
+            sentiment['reddit_mentions'] = len(posts)
+            
+            # Simple sentiment from upvotes
+            if posts:
+                total_score = sum(p.get('data', {}).get('score', 0) for p in posts)
+                avg_score = total_score / len(posts) if posts else 0
+                if avg_score > 100:
+                    sentiment['reddit_sentiment'] = 'Very Bullish 🚀'
+                elif avg_score > 20:
+                    sentiment['reddit_sentiment'] = 'Bullish 📈'
+                elif avg_score > 0:
+                    sentiment['reddit_sentiment'] = 'Neutral 😐'
+                else:
+                    sentiment['reddit_sentiment'] = 'Bearish 📉'
+    except Exception as e:
+        print(f"Reddit fetch error: {e}")
+    
+    # Try StockTwits
+    try:
+        st_url = f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json"
+        response = requests.get(st_url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            messages = data.get('messages', [])
+            if messages:
+                bullish = sum(1 for m in messages if m.get('entities', {}).get('sentiment', {}).get('basic') == 'Bullish')
+                bearish = sum(1 for m in messages if m.get('entities', {}).get('sentiment', {}).get('basic') == 'Bearish')
+                total = bullish + bearish
+                if total > 0:
+                    bull_pct = bullish / total * 100
+                    if bull_pct > 70:
+                        sentiment['stocktwits_sentiment'] = f'Very Bullish ({bull_pct:.0f}% 🟢)'
+                    elif bull_pct > 50:
+                        sentiment['stocktwits_sentiment'] = f'Bullish ({bull_pct:.0f}% 🟢)'
+                    elif bull_pct > 30:
+                        sentiment['stocktwits_sentiment'] = f'Mixed ({bull_pct:.0f}% 🟡)'
+                    else:
+                        sentiment['stocktwits_sentiment'] = f'Bearish ({bull_pct:.0f}% 🔴)'
+    except Exception as e:
+        print(f"StockTwits fetch error: {e}")
+    
+    # Get news sentiment from Yahoo Finance
+    try:
+        ticker = yf.Ticker(symbol)
+        news = ticker.news
+        if news:
+            sentiment['news_count'] = len(news)
+            # Check for positive/negative keywords in titles
+            positive_words = ['surge', 'jump', 'soar', 'gain', 'rally', 'bull', 'upgrade', 'beat', 'record', 'strong']
+            negative_words = ['fall', 'drop', 'plunge', 'decline', 'bear', 'downgrade', 'miss', 'weak', 'concern', 'risk']
+            
+            pos_count = 0
+            neg_count = 0
+            for article in news[:10]:
+                title = article.get('title', '').lower()
+                pos_count += sum(1 for w in positive_words if w in title)
+                neg_count += sum(1 for w in negative_words if w in title)
+            
+            if pos_count > neg_count + 2:
+                sentiment['news_sentiment'] = 'Positive 📰'
+            elif neg_count > pos_count + 2:
+                sentiment['news_sentiment'] = 'Negative 📰'
+            else:
+                sentiment['news_sentiment'] = 'Neutral 📰'
+    except Exception as e:
+        print(f"News fetch error: {e}")
+    
+    return sentiment
+
+
+# ════════════════════════════════════════════════════════════════
+# DCF VALUATION
+# ════════════════════════════════════════════════════════════════
+
+def calculate_dcf_value(symbol):
+    """
+    Calculate intrinsic value using DCF model.
+    Returns dict with dcf details or None if can't calculate.
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        
+        # Get free cash flow
+        cashflow = ticker.cashflow
+        if cashflow is None or cashflow.empty:
+            return {'status': 'no_data', 'dcf_value': None, 'margin': None}
+        
+        # Find Free Cash Flow
+        fcf = None
+        fcf_history = []
+        
+        for row_name in ['Free Cash Flow', 'FreeCashFlow']:
+            if row_name in cashflow.index:
+                fcf_row = cashflow.loc[row_name]
+                fcf = fcf_row.iloc[0] if len(fcf_row) > 0 else None
+                fcf_history = fcf_row.tolist()[:4]  # Last 4 years
+                break
+        
+        if fcf is None:
+            # Try to calculate: Operating Cash Flow - CapEx
+            ocf = None
+            capex = None
+            for row_name in ['Operating Cash Flow', 'Total Cash From Operating Activities']:
+                if row_name in cashflow.index:
+                    ocf = cashflow.loc[row_name].iloc[0]
+                    break
+            for row_name in ['Capital Expenditure', 'Capital Expenditures']:
+                if row_name in cashflow.index:
+                    capex = abs(cashflow.loc[row_name].iloc[0])
+                    break
+            if ocf is not None and capex is not None:
+                fcf = ocf - capex
+            else:
+                return {'status': 'no_fcf', 'dcf_value': None, 'margin': None}
+        
+        if fcf is None or fcf <= 0:
+            return {'status': 'negative_fcf', 'dcf_value': '-FCF', 'margin': None, 'fcf': fcf}
+        
+        # Get shares outstanding
+        shares = info.get('sharesOutstanding', None)
+        if not shares:
+            return {'status': 'no_shares', 'dcf_value': None, 'margin': None}
+        
+        # DCF parameters
+        growth_rate = 0.10  # 10% growth for 5 years
+        terminal_growth = 0.03  # 3% terminal growth
+        discount_rate = 0.10  # 10% discount rate
+        years = 5
+        
+        # Project future cash flows
+        projected_fcf = []
+        current_fcf = fcf
+        for year in range(1, years + 1):
+            current_fcf = current_fcf * (1 + growth_rate)
+            discounted = current_fcf / ((1 + discount_rate) ** year)
+            projected_fcf.append(discounted)
+        
+        # Terminal value
+        terminal_fcf = current_fcf * (1 + terminal_growth)
+        terminal_value = terminal_fcf / (discount_rate - terminal_growth)
+        discounted_terminal = terminal_value / ((1 + discount_rate) ** years)
+        
+        # Total intrinsic value
+        total_value = sum(projected_fcf) + discounted_terminal
+        intrinsic_per_share = total_value / shares
+        
+        # Get current price
+        current_price = info.get('currentPrice', info.get('regularMarketPrice', None))
+        if not current_price:
+            return {
+                'status': 'success',
+                'dcf_value': round(intrinsic_per_share, 2),
+                'margin': None,
+                'fcf': fcf,
+                'shares': shares,
+                'growth_rate': growth_rate,
+                'discount_rate': discount_rate,
+            }
+        
+        # Margin of safety
+        margin_of_safety = ((intrinsic_per_share - current_price) / current_price) * 100
+        
+        return {
+            'status': 'success',
+            'dcf_value': round(intrinsic_per_share, 2),
+            'margin': round(margin_of_safety, 1),
+            'fcf': fcf,
+            'fcf_fmt': format_market_cap(fcf),
+            'shares': shares,
+            'current_price': current_price,
+            'growth_rate': growth_rate * 100,
+            'discount_rate': discount_rate * 100,
+            'terminal_growth': terminal_growth * 100,
+            'fcf_history': fcf_history,
+        }
+        
+    except Exception as e:
+        print(f"DCF calculation error for {symbol}: {e}")
+        return {'status': 'error', 'dcf_value': None, 'margin': None, 'error': str(e)}
+
+
+# ════════════════════════════════════════════════════════════════
+# PATTERN DETECTION: CUP & HANDLE
+# ════════════════════════════════════════════════════════════════
+
+def detect_cup_and_handle(df, min_cup_days=20, max_cup_days=130):
+    """
+    Detect cup and handle pattern with U-shape and symmetry scoring.
+    """
+    if len(df) < max_cup_days + 30:
+        return None
+
+    closes = df['Close'].values
+    highs = df['High'].values
+    lows = df['Low'].values
+    volumes = df['Volume'].values
+
+    order = 10
+    local_max_idx = argrelextrema(closes, np.greater_equal, order=order)[0]
+    local_min_idx = argrelextrema(closes, np.less_equal, order=order)[0]
+
+    if len(local_max_idx) < 2 or len(local_min_idx) < 1:
+        return None
+
+    lookback = min(len(closes), max_cup_days + 50)
+    recent_max = [i for i in local_max_idx if i >= len(closes) - lookback]
+    recent_min = [i for i in local_min_idx if i >= len(closes) - lookback]
+
+    if len(recent_max) < 2 or len(recent_min) < 1:
+        return None
+
+    best_pattern = None
+    best_score = 0
+
+    for i, left_rim_idx in enumerate(recent_max[:-1]):
+        for right_rim_idx in recent_max[i+1:]:
+            cup_length = right_rim_idx - left_rim_idx
+
+            if cup_length < min_cup_days or cup_length > max_cup_days:
+                continue
+
+            bottom_candidates = [m for m in recent_min if left_rim_idx < m < right_rim_idx]
+            if not bottom_candidates:
+                continue
+
+            bottom_idx = min(bottom_candidates, key=lambda x: closes[x])
+
+            left_rim_price = closes[left_rim_idx]
+            right_rim_price = closes[right_rim_idx]
+            bottom_price = closes[bottom_idx]
+
+            avg_rim = (left_rim_price + right_rim_price) / 2
+            cup_depth_pct = (avg_rim - bottom_price) / avg_rim * 100
+
+            if cup_depth_pct < 12 or cup_depth_pct > 35:
+                continue
+
+            rim_diff = abs(left_rim_price - right_rim_price) / avg_rim * 100
+            if rim_diff > 5:
+                continue
+
+            # Calculate U-shape score
+            cup_prices = closes[left_rim_idx:right_rim_idx+1]
+            cup_mid = len(cup_prices) // 2
+            left_half = cup_prices[:cup_mid]
+            right_half = cup_prices[cup_mid:]
+            
+            if len(left_half) > 2 and len(right_half) > 2:
+                left_slope = float(abs(np.polyfit(range(len(left_half)), left_half.flatten(), 1)[0]))
+                right_slope = float(abs(np.polyfit(range(len(right_half)), right_half.flatten(), 1)[0]))
+                u_shape_score = 1 / (1 + (left_slope + right_slope) * 10)
+            else:
+                u_shape_score = 0.5
+            
+            # Symmetry
+            left_days = bottom_idx - left_rim_idx
+            right_days = right_rim_idx - bottom_idx
+            symmetry = 1 - abs(left_days - right_days) / cup_length
+            symmetry_pct = symmetry * 100
+
+            # Handle check
+            handle_start = right_rim_idx
+            handle_data = closes[handle_start:]
+            handle_volumes = volumes[handle_start:] if handle_start < len(volumes) else []
+
+            if len(handle_data) < 5:
+                continue
+
+            handle_low = min(handle_data)
+            handle_high = max(handle_data)
+            handle_decline = (right_rim_price - handle_low) / right_rim_price * 100
+
+            if handle_decline < 2 or handle_decline > 15:
+                continue
+
+            # Handle volume contraction check
+            cup_avg_vol = np.mean(volumes[left_rim_idx:right_rim_idx])
+            handle_avg_vol = np.mean(handle_volumes) if len(handle_volumes) > 0 else cup_avg_vol
+            handle_vol_contraction = handle_avg_vol < cup_avg_vol * 0.8
+
+            score = 100 - abs(cup_depth_pct - 25) - rim_diff - abs(handle_decline - 8)
+            score += u_shape_score * 10 + symmetry * 10
+
+            if score > best_score:
+                best_score = score
+                best_pattern = {
+                    'left_rim_idx': int(left_rim_idx),
+                    'right_rim_idx': int(right_rim_idx),
+                    'bottom_idx': int(bottom_idx),
+                    'left_rim_price': float(np.asarray(left_rim_price).flatten()[0]) if hasattr(left_rim_price, '__iter__') else float(left_rim_price),
+                    'right_rim_price': float(np.asarray(right_rim_price).flatten()[0]) if hasattr(right_rim_price, '__iter__') else float(right_rim_price),
+                    'bottom_price': float(np.asarray(bottom_price).flatten()[0]) if hasattr(bottom_price, '__iter__') else float(bottom_price),
+                    'cup_depth_pct': float(np.asarray(cup_depth_pct).flatten()[0]) if hasattr(cup_depth_pct, '__iter__') else float(cup_depth_pct),
+                    'cup_length_days': int(cup_length),
+                    'handle_low': float(np.asarray(handle_low).flatten()[0]) if hasattr(handle_low, '__iter__') else float(handle_low),
+                    'handle_high': float(np.asarray(handle_high).flatten()[0]) if hasattr(handle_high, '__iter__') else float(handle_high),
+                    'handle_decline_pct': float(np.asarray(handle_decline).flatten()[0]) if hasattr(handle_decline, '__iter__') else float(handle_decline),
+                    'handle_days': len(handle_data),
+                    'u_shape_score': round(float(u_shape_score), 3),
+                    'symmetry_pct': round(float(symmetry_pct), 1),
+                    'handle_vol_contraction': bool(handle_vol_contraction),
+                    'score': float(np.asarray(score).flatten()[0]) if hasattr(score, '__iter__') else float(score)
+                }
+
+    return best_pattern
+
+
+# ════════════════════════════════════════════════════════════════
+# PATTERN DETECTION: ASCENDING TRIANGLE
+# ════════════════════════════════════════════════════════════════
+
+def detect_ascending_triangle(df, lookback=60):
+    """
+    Detect ascending triangle: flat resistance + rising support.
+    Returns dict with resistance, support slope, target if found.
+    """
+    if len(df) < lookback:
+        return None
+    
+    recent = df.tail(lookback)
+    highs = recent['High'].values
+    lows = recent['Low'].values
+    closes = recent['Close'].values
+    indices = np.arange(len(recent))
+    
+    # Find resistance (multiple touches at similar high)
+    order = 5
+    local_highs_idx = argrelextrema(highs, np.greater_equal, order=order)[0]
+    
+    if len(local_highs_idx) < 3:
+        return None
+    
+    high_prices = highs[local_highs_idx]
+    resistance = np.mean(high_prices[-5:])
+    
+    # Check if highs are flat (within 3% of each other)
+    high_range = (max(high_prices[-5:]) - min(high_prices[-5:])) / resistance * 100
+    if high_range > 3:
+        return None
+    
+    # Check for rising lows (ascending support)
+    local_lows_idx = argrelextrema(lows, np.less_equal, order=order)[0]
+    if len(local_lows_idx) < 3:
+        return None
+    
+    low_prices = lows[local_lows_idx]
+    
+    # Linear regression on lows
+    if len(local_lows_idx) >= 3:
+        slope, intercept, r_value, _, _ = linregress(local_lows_idx, low_prices)
+        
+        # Slope should be positive (rising lows) with decent fit
+        if slope > 0 and r_value > 0.5:
+            # Calculate target (height of triangle added to breakout)
+            triangle_height = resistance - low_prices[0]
+            target = resistance + triangle_height
+            
+            return {
+                'resistance': round(resistance, 2),
+                'support_slope': round(slope, 4),
+                'target': round(target, 2),
+                'r_squared': round(r_value ** 2, 3),
+                'touches': len(local_highs_idx),
+                'local_highs_idx': local_highs_idx.tolist(),
+                'local_lows_idx': local_lows_idx.tolist(),
+            }
+    
+    return None
+
+
+# ════════════════════════════════════════════════════════════════
+# PATTERN DETECTION: BULL FLAG / PENNANT
+# ════════════════════════════════════════════════════════════════
+
+def detect_bull_flag(df, lookback=40):
+    """
+    Detect bull flag: strong pole (surge) + consolidation.
+    Returns dict with pole gain, flag details if found.
+    """
+    if len(df) < lookback:
+        return None
+    
+    recent = df.tail(lookback)
+    closes = recent['Close'].values
+    highs = recent['High'].values
+    lows = recent['Low'].values
+    
+    # Find the pole: sharp rise in first portion
+    pole_period = lookback // 2
+    pole_data = closes[:pole_period]
+    
+    if len(pole_data) < 5:
+        return None
+    
+    pole_low_idx = np.argmin(pole_data[:len(pole_data)//2])
+    pole_low = pole_data[pole_low_idx]
+    pole_high_idx = np.argmax(pole_data)
+    pole_high = pole_data[pole_high_idx]
+    
+    # Pole should go up (low before high)
+    if pole_low_idx >= pole_high_idx:
+        return None
+    
+    pole_gain = (pole_high - pole_low) / pole_low * 100
+    
+    # Pole should be significant (at least 10% gain)
+    if pole_gain < 10:
+        return None
+    
+    # Flag portion: consolidation
+    flag_data = closes[pole_period:]
+    flag_highs = highs[pole_period:]
+    flag_lows = lows[pole_period:]
+    
+    if len(flag_data) < 5:
+        return None
+    
+    flag_high = max(flag_highs)
+    flag_low = min(flag_lows)
+    flag_range = (flag_high - flag_low) / pole_high * 100
+    
+    # Flag should be tight (less than 15% range)
+    if flag_range > 15:
+        return None
+    
+    # Flag should not give back more than 50% of pole gains
+    flag_pullback = (pole_high - flag_low) / (pole_high - pole_low) * 100
+    if flag_pullback > 50:
+        return None
+    
+    # Calculate flag slope (should be slightly down or flat)
+    flag_indices = np.arange(len(flag_data))
+    slope, _, _, _, _ = linregress(flag_indices, flag_data)
+    
+    # Target: pole height added to breakout
+    target = flag_high + (pole_high - pole_low)
+    
+    return {
+        'pole_gain': round(pole_gain, 1),
+        'pole_low': round(pole_low, 2),
+        'pole_high': round(pole_high, 2),
+        'pole_days': pole_high_idx - pole_low_idx,
+        'flag_high': round(flag_high, 2),
+        'flag_low': round(flag_low, 2),
+        'flag_range_pct': round(flag_range, 1),
+        'flag_days': len(flag_data),
+        'flag_slope': round(slope, 4),
+        'target': round(target, 2),
+        'pole_start_idx': pole_low_idx,
+        'pole_end_idx': pole_high_idx,
+    }
+
+
+# ════════════════════════════════════════════════════════════════
+# GOLDEN CROSS DETECTION
+# ════════════════════════════════════════════════════════════════
+
+def detect_golden_cross(df, lookback_days=20):
+    """
+    Detect golden cross (50 SMA crosses above 200 SMA) within lookback period.
+    Also detects death cross (50 crosses below 200).
+    Returns dict with cross info or None.
+    """
+    if len(df) < 200:
+        return None
+    
+    df_calc = df.copy()
+    df_calc['SMA50'] = df_calc['Close'].rolling(50).mean()
+    df_calc['SMA200'] = df_calc['Close'].rolling(200).mean()
+    
+    # Get recent data where both SMAs exist
+    df_valid = df_calc.dropna(subset=['SMA50', 'SMA200']).tail(lookback_days + 1)
+    
+    if len(df_valid) < 2:
+        return None
+    
+    # Check for crossovers in the lookback period
+    golden_cross_date = None
+    death_cross_date = None
+    
+    for i in range(1, len(df_valid)):
+        prev_row = df_valid.iloc[i-1]
+        curr_row = df_valid.iloc[i]
+        
+        # Golden cross: 50 crosses above 200
+        if prev_row['SMA50'] <= prev_row['SMA200'] and curr_row['SMA50'] > curr_row['SMA200']:
+            golden_cross_date = df_valid.index[i]
+        
+        # Death cross: 50 crosses below 200
+        if prev_row['SMA50'] >= prev_row['SMA200'] and curr_row['SMA50'] < curr_row['SMA200']:
+            death_cross_date = df_valid.index[i]
+    
+    # Current state
+    last = df_valid.iloc[-1]
+    sma50_above_200 = last['SMA50'] > last['SMA200']
+    
+    # Days since cross
+    days_since_golden = None
+    days_since_death = None
+    
+    if golden_cross_date is not None:
+        days_since_golden = (df_valid.index[-1] - golden_cross_date).days
+    if death_cross_date is not None:
+        days_since_death = (df_valid.index[-1] - death_cross_date).days
+    
+    return {
+        'golden_cross': golden_cross_date is not None,
+        'golden_cross_date': golden_cross_date,
+        'days_since_golden': days_since_golden,
+        'death_cross': death_cross_date is not None,
+        'death_cross_date': death_cross_date,
+        'days_since_death': days_since_death,
+        'sma50_above_200': sma50_above_200,
+    }
+
+
+# ════════════════════════════════════════════════════════════════
+# BREAKOUT ANALYSIS
+# ════════════════════════════════════════════════════════════════
+
+def check_breakout_criteria(df, pattern, asc_triangle=None, bull_flag=None):
+    """
+    Validate breakout with comprehensive criteria.
+    """
+    if pattern is None:
+        return None
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) > 1 else last
+
+    resistance = pattern['right_rim_price']
+    buy_point = resistance * 1.001
+    current_price = last['Close']
+
+    # Calculate indicators
+    df_calc = df.copy()
+    df_calc['SMA50'] = df_calc['Close'].rolling(50).mean()
+    df_calc['SMA200'] = df_calc['Close'].rolling(200).mean()
+    df_calc['RSI'] = ta.rsi(df_calc['Close'], length=14)
+    
+    # ADX
+    adx_data = ta.adx(df_calc['High'], df_calc['Low'], df_calc['Close'], length=14)
+    if adx_data is not None and 'ADX_14' in adx_data.columns:
+        df_calc['ADX'] = adx_data['ADX_14']
+    else:
+        df_calc['ADX'] = None
+
+    # MACD
+    macd = ta.macd(df_calc['Close'], fast=12, slow=26, signal=9)
+    if macd is not None:
+        df_calc['MACD'] = macd['MACD_12_26_9']
+        df_calc['MACD_signal'] = macd['MACDs_12_26_9']
+    else:
+        df_calc['MACD'] = None
+        df_calc['MACD_signal'] = None
+
+    last = df_calc.iloc[-1]
+    prev = df_calc.iloc[-2] if len(df_calc) > 1 else last
+
+    # Get values
+    sma50 = last['SMA50'] if not pd.isna(last.get('SMA50')) else None
+    sma200 = last['SMA200'] if not pd.isna(last.get('SMA200')) else None
+    rsi = last['RSI'] if not pd.isna(last.get('RSI')) else None
+    adx = last['ADX'] if not pd.isna(last.get('ADX')) else None
+    macd_val = last['MACD'] if not pd.isna(last.get('MACD')) else None
+    macd_sig = last['MACD_signal'] if not pd.isna(last.get('MACD_signal')) else None
+
+    # Volume analysis
+    handle_start = pattern['right_rim_idx']
+    avg_20_vol = df['Volume'].rolling(20).mean().iloc[-1]
+    current_vol = last['Volume']
+    vol_ratio = current_vol / avg_20_vol if avg_20_vol > 0 else 1
+    
+    # Volume requirement: 2x average for breakout
+    volume_requirement = 2.0
+    volume_spike = vol_ratio >= volume_requirement
+
+    # Handle volume contraction
+    handle_vol_contraction = pattern.get('handle_vol_contraction', False)
+
+    # Calculate stop loss and target
+    handle_low = pattern['handle_low']
+    stop_loss = handle_low * 0.97
+    
+    cup_height = pattern['right_rim_price'] - pattern['bottom_price']
+    target = buy_point + cup_height
+    
+    risk = buy_point - stop_loss
+    reward = target - buy_point
+    rr_ratio = reward / risk if risk > 0 else 0
+
+    # Criteria checks with detailed info
+    criteria = {
+        'breakout_confirmed': {
+            'passed': current_price > buy_point,
+            'value': f"${current_price:.2f}",
+            'requirement': f">${buy_point:.2f}",
+        },
+        'above_sma50': {
+            'passed': current_price > sma50 if sma50 else False,
+            'value': f"${sma50:.2f}" if sma50 else 'N/A',
+        },
+        'above_sma200': {
+            'passed': current_price > sma200 if sma200 else False,
+            'value': f"${sma200:.2f}" if sma200 else 'N/A',
+        },
+        'volume_spike': {
+            'passed': volume_spike,
+            'value': f"{vol_ratio:.2f}x",
+            'requirement': f"(req: {volume_requirement}x)",
+        },
+        'handle_vol_contraction': {
+            'passed': handle_vol_contraction,
+            'value': 'Yes' if handle_vol_contraction else 'No',
+        },
+        'macd_bullish': {
+            'passed': (macd_val > macd_sig) if (macd_val and macd_sig) else False,
+            'value': f"{macd_val:.3f}" if macd_val else 'N/A',
+        },
+        'adx_strong': {
+            'passed': adx > 25 if adx else False,
+            'value': f"{adx:.1f}" if adx else 'N/A',
+            'requirement': '(>25)',
+        },
+        'rsi_healthy': {
+            'passed': 50 <= rsi <= 70 if rsi else False,
+            'value': f"{rsi:.1f}" if rsi else 'N/A',
+            'requirement': '(50-70)',
+        },
+    }
+
+    # Detect golden cross
+    golden_cross_info = detect_golden_cross(df, lookback_days=20)
+    
+    # Signal score
+    signal_score = sum([
+        criteria['breakout_confirmed']['passed'] * 25,
+        criteria['above_sma50']['passed'] * 15,
+        criteria['above_sma200']['passed'] * 15,
+        criteria['rsi_healthy']['passed'] * 10,
+        criteria['volume_spike']['passed'] * 15,
+        criteria['macd_bullish']['passed'] * 10,
+        criteria['adx_strong']['passed'] * 5,
+        criteria['handle_vol_contraction']['passed'] * 5,
+    ])
+    
+    # Bonus for recent golden cross
+    if golden_cross_info and golden_cross_info['golden_cross']:
+        signal_score += 5
+
+    # Status
+    if criteria['breakout_confirmed']['passed'] and criteria['above_sma50']['passed'] and criteria['above_sma200']['passed']:
+        if signal_score >= 75:
+            status = "STRONG BUY"
+        elif signal_score >= 55:
+            status = "BUY"
+        else:
+            status = "WATCH"
+    elif not criteria['breakout_confirmed']['passed'] and current_price > resistance * 0.97:
+        status = "FORMING - NEAR BREAKOUT"
+    elif not criteria['breakout_confirmed']['passed']:
+        status = "FORMING"
+    else:
+        status = "WATCH"
+
+    return {
+        'buy_point': round(buy_point, 2),
+        'current_price': round(current_price, 2),
+        'resistance': round(resistance, 2),
+        'sma50': round(sma50, 2) if sma50 else None,
+        'sma200': round(sma200, 2) if sma200 else None,
+        'rsi': round(rsi, 1) if rsi else None,
+        'adx': round(adx, 1) if adx else None,
+        'volume_ratio': round(vol_ratio, 2),
+        'stop_loss': round(stop_loss, 2),
+        'target': round(target, 2),
+        'rr_ratio': round(rr_ratio, 2),
+        'criteria': criteria,
+        'signal_score': signal_score,
+        'status': status,
+        'pattern': pattern,
+        'golden_cross': golden_cross_info,
+    }
+
+
+# ════════════════════════════════════════════════════════════════
+# UNIFIED CHART GENERATION
+# ════════════════════════════════════════════════════════════════
+
+def generate_unified_chart(symbol, df, pattern, asc_triangle, bull_flag, buy_point, show_smas=None):
+    """Generate single chart with all patterns overlaid + volume.
+    
+    Args:
+        show_smas: List of SMA periods to display, e.g. [50, 200] or None for all
+    """
+    
+    # Default: show 50 and 200. Use show_smas=[] to hide all, or specific list
+    if show_smas is None:
+        show_smas = [50, 200]  # Default to just 50 and 200
+    
+    # Debug info
+    print(f"DEBUG: {symbol} - DataFrame has {len(df)} rows, columns: {list(df.columns)}")
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), height_ratios=[3, 1], sharex=True)
+    fig.suptitle(f'{symbol} - Pattern Analysis', fontsize=14, fontweight='bold', color='white')
+    fig.patch.set_facecolor('#1a1a2e')
+    
+    # Set dark background
+    ax1.set_facecolor('#0f0f23')
+    ax2.set_facecolor('#0f0f23')
+    
+    # Main price chart
+    ax1.plot(df.index, df['Close'], 'cyan', linewidth=1.5, label='Price', zorder=2)
+    
+    # Add SMAs based on show_smas parameter
+    # All available SMAs with their styling (period, color, width, alpha)
+    all_sma_configs = {
+        13:  ('#ff6b6b', 1.2, 0.9),   # Red - fast
+        26:  ('#ffd93d', 1.2, 0.9),   # Yellow
+        40:  ('#6bcb77', 1.2, 0.9),   # Green
+        50:  ('#4d96ff', 1.5, 1.0),   # Blue
+        200: ('#ff8c00', 1.8, 1.0),   # Orange - slow
+    }
+    
+    for period in show_smas:
+        if period in all_sma_configs:
+            color, width, alpha = all_sma_configs[period]
+            # Use pre-calculated SMA if available, otherwise calculate
+            sma_col = f'SMA{period}'
+            if sma_col in df.columns:
+                sma = df[sma_col].copy()
+                # Count valid (non-NaN) values for debugging
+                valid_count = sma.notna().sum()
+                print(f"DEBUG: {symbol} SMA{period} - {valid_count}/{len(sma)} valid values (pre-calculated)")
+            elif len(df) >= period:
+                sma = df['Close'].rolling(period).mean()
+                valid_count = sma.notna().sum()
+                print(f"DEBUG: {symbol} SMA{period} - {valid_count}/{len(sma)} valid values (calculated)")
+            else:
+                print(f"DEBUG: {symbol} SMA{period} - skipped (not enough data: {len(df)} < {period})")
+                continue
+            # Plot only if we have valid data
+            if sma.notna().any():
+                ax1.plot(df.index, sma, color, linewidth=width, alpha=alpha, label=f'SMA {period}')
+    
+    # Mark Golden Cross if detected (50 crosses above 200) - only if both SMAs are displayed
+    if 50 in show_smas and 200 in show_smas:
+        # Use pre-calculated SMAs if available
+        if 'SMA50' in df.columns and 'SMA200' in df.columns:
+            sma50 = df['SMA50']
+            sma200 = df['SMA200']
+        elif len(df) >= 200:
+            sma50 = df['Close'].rolling(50).mean()
+            sma200 = df['Close'].rolling(200).mean()
+        else:
+            sma50 = None
+            sma200 = None
+        
+        # Find golden/death crosses
+        if sma50 is not None and sma200 is not None:
+            for i in range(1, len(df)):
+                if pd.notna(sma50.iloc[i]) and pd.notna(sma200.iloc[i]) and pd.notna(sma50.iloc[i-1]) and pd.notna(sma200.iloc[i-1]):
+                    # Golden cross
+                    if sma50.iloc[i-1] <= sma200.iloc[i-1] and sma50.iloc[i] > sma200.iloc[i]:
+                        ax1.axvline(x=df.index[i], color='gold', linestyle='--', linewidth=1.5, alpha=0.8)
+                        ax1.scatter([df.index[i]], [sma50.iloc[i]], color='gold', s=150, marker='*', 
+                                   zorder=10, edgecolors='white', linewidths=1)
+                        ax1.annotate('Golden Cross', xy=(df.index[i], sma50.iloc[i]), 
+                                   xytext=(10, 20), textcoords='offset points',
+                                   fontsize=9, color='gold', fontweight='bold',
+                                   arrowprops=dict(arrowstyle='->', color='gold', lw=1))
+                    # Death cross
+                    elif sma50.iloc[i-1] >= sma200.iloc[i-1] and sma50.iloc[i] < sma200.iloc[i]:
+                        ax1.axvline(x=df.index[i], color='red', linestyle='--', linewidth=1.5, alpha=0.6)
+                        ax1.scatter([df.index[i]], [sma50.iloc[i]], color='red', s=100, marker='x', 
+                                   zorder=10, linewidths=2)
+    
+    # Draw Cup & Handle pattern
+    if pattern:
+        left_idx = pattern['left_rim_idx']
+        right_idx = pattern['right_rim_idx']
+        bottom_idx = pattern['bottom_idx']
+        
+        if left_idx < len(df) and right_idx < len(df) and bottom_idx < len(df):
+            # Cup outline
+            cup_dates = df.index[left_idx:right_idx+1]
+            cup_prices = df['Close'].iloc[left_idx:right_idx+1]
+            ax1.fill_between(cup_dates, cup_prices, pattern['bottom_price'], 
+                           alpha=0.15, color='lime', label='Cup Formation')
+            
+            # Mark key points
+            ax1.scatter([df.index[left_idx]], [pattern['left_rim_price']], 
+                       color='lime', s=120, zorder=5, marker='^', edgecolors='white', linewidths=1)
+            ax1.scatter([df.index[right_idx]], [pattern['right_rim_price']], 
+                       color='lime', s=120, zorder=5, marker='^', edgecolors='white', linewidths=1)
+            ax1.scatter([df.index[bottom_idx]], [pattern['bottom_price']], 
+                       color='red', s=120, zorder=5, marker='v', edgecolors='white', linewidths=1)
+            
+            # Resistance line (neckline)
+            ax1.axhline(y=pattern['right_rim_price'], color='lime', linestyle='--', 
+                       linewidth=1.5, alpha=0.8, label=f"Resistance ${pattern['right_rim_price']:.2f}")
+    
+    # Draw Buy Point
+    if buy_point:
+        ax1.axhline(y=buy_point, color='#00ff00', linestyle='-', linewidth=2, 
+                   alpha=0.9, label=f"BUY POINT ${buy_point:.2f}")
+        # Add arrow annotation
+        ax1.annotate(f'  BUY ${buy_point:.2f}', xy=(df.index[-1], buy_point),
+                    fontsize=10, fontweight='bold', color='#00ff00',
+                    verticalalignment='center')
+    
+    # Draw Ascending Triangle (pink/magenta)
+    if asc_triangle:
+        # Resistance line
+        ax1.axhline(y=asc_triangle['resistance'], color='magenta', linestyle='-', 
+                   linewidth=2, alpha=0.8, label=f"△ Resistance ${asc_triangle['resistance']:.2f}")
+        
+        # Rising support line - draw across recent data
+        lookback = 60
+        if len(df) > lookback:
+            recent_idx = np.arange(len(df) - lookback, len(df))
+            support_line = asc_triangle['support_slope'] * np.arange(lookback) + \
+                          (df['Close'].iloc[-lookback] - asc_triangle['support_slope'] * lookback/2)
+            ax1.plot(df.index[-lookback:], support_line, 'magenta', linestyle='--', 
+                    linewidth=1.5, alpha=0.7, label='△ Support')
+        
+        # Target line
+        ax1.axhline(y=asc_triangle['target'], color='magenta', linestyle=':', 
+                   linewidth=1, alpha=0.5, label=f"△ Target ${asc_triangle['target']:.2f}")
+    
+    # Draw Bull Flag (orange)
+    if bull_flag:
+        lookback = 40
+        start_idx = max(0, len(df) - lookback)
+        
+        # Pole
+        pole_start = start_idx + bull_flag.get('pole_start_idx', 0)
+        pole_end = start_idx + bull_flag.get('pole_end_idx', 10)
+        
+        if pole_start < len(df) and pole_end < len(df):
+            ax1.plot([df.index[pole_start], df.index[pole_end]], 
+                    [bull_flag['pole_low'], bull_flag['pole_high']], 
+                    'orange', linewidth=3, alpha=0.8, label=f"Flag Pole +{bull_flag['pole_gain']:.0f}%")
+        
+        # Flag boundaries
+        ax1.axhline(y=bull_flag['flag_high'], color='orange', linestyle='--', 
+                   linewidth=1.5, alpha=0.6)
+        ax1.axhline(y=bull_flag['flag_low'], color='orange', linestyle='--', 
+                   linewidth=1.5, alpha=0.6)
+        
+        # Flag target
+        ax1.axhline(y=bull_flag['target'], color='orange', linestyle=':', 
+                   linewidth=1, alpha=0.5, label=f"Flag Target ${bull_flag['target']:.2f}")
+    
+    # Styling
+    ax1.set_ylabel('Price ($)', color='white', fontsize=10)
+    ax1.tick_params(colors='white')
+    ax1.legend(loc='upper left', fontsize=8, facecolor='#16213e', edgecolor='gray', labelcolor='white')
+    ax1.grid(True, alpha=0.2, color='gray')
+    ax1.spines['bottom'].set_color('gray')
+    ax1.spines['top'].set_color('gray')
+    ax1.spines['left'].set_color('gray')
+    ax1.spines['right'].set_color('gray')
+    
+    # Volume chart
+    colors = ['#00c853' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#f44336' 
+              for i in range(len(df))]
+    ax2.bar(df.index, df['Volume'], color=colors, alpha=0.7, width=0.8)
+    
+    # Volume average
+    vol_avg = df['Volume'].rolling(20).mean()
+    ax2.plot(df.index, vol_avg, 'yellow', linewidth=1, alpha=0.8, label='20-day Avg')
+    
+    ax2.set_ylabel('Volume', color='white', fontsize=10)
+    ax2.set_xlabel('Date', color='white', fontsize=10)
+    ax2.tick_params(colors='white')
+    ax2.legend(loc='upper left', fontsize=8, facecolor='#16213e', edgecolor='gray', labelcolor='white')
+    ax2.grid(True, alpha=0.2, color='gray')
+    ax2.spines['bottom'].set_color('gray')
+    ax2.spines['top'].set_color('gray')
+    ax2.spines['left'].set_color('gray')
+    ax2.spines['right'].set_color('gray')
+    
+    # Format x-axis
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+    ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+    plt.xticks(rotation=45)
+    
+    plt.tight_layout()
+    
+    # Save to base64
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png', dpi=120, bbox_inches='tight', 
+                facecolor='#1a1a2e', edgecolor='none')
+    buffer.seek(0)
+    image_base64 = base64.b64encode(buffer.getvalue()).decode()
+    plt.close(fig)
+    
+    return image_base64
+
+
+# ════════════════════════════════════════════════════════════════
+# MAIN SCANNER (BATCH DOWNLOAD FOR SPEED)
+# ════════════════════════════════════════════════════════════════
+
+def scan_for_patterns(tickers=None, progress_callback=None):
+    if tickers is None:
+        tickers = get_sp500_tickers()
+
+    results = []
+    total = len(tickers)
+    
+    # Batch download all data at once - MUCH faster than individual calls
+    print(f"Batch downloading {len(tickers)} stocks...")
+    
+    # Download in chunks to avoid timeout
+    chunk_size = 100
+    all_data = {}
+    
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i:i+chunk_size]
+        chunk_str = ' '.join(chunk)
+        try:
+            data = yf.download(chunk_str, period="1y", group_by='ticker', 
+                              progress=False, threads=True)
+            
+            # Handle single vs multiple tickers
+            if len(chunk) == 1:
+                all_data[chunk[0]] = data
+            else:
+                for symbol in chunk:
+                    if symbol in data.columns.get_level_values(0):
+                        all_data[symbol] = data[symbol].dropna()
+        except Exception as e:
+            print(f"Chunk download error: {e}")
+        
+        if progress_callback:
+            progress_callback(min(i + chunk_size, total), total, f"Downloaded {min(i + chunk_size, total)}/{total}")
+    
+    print(f"Download complete. Analyzing {len(all_data)} stocks...")
+    
+    # Now analyze each stock
+    for idx, (symbol, df) in enumerate(all_data.items()):
+        if progress_callback and idx % 50 == 0:
+            progress_callback(idx, len(all_data), symbol)
+
+        try:
+            if df.empty or len(df) < 150:
+                continue
+
+            # Detect all patterns
+            cup_pattern = detect_cup_and_handle(df)
+            
+            if cup_pattern is None:
+                continue
+
+            asc_triangle = detect_ascending_triangle(df)
+            bull_flag = detect_bull_flag(df)
+            
+            # Count patterns
+            pattern_count = 1
+            if asc_triangle:
+                pattern_count += 1
+            if bull_flag:
+                pattern_count += 1
+
+            # Check breakout criteria
+            analysis = check_breakout_criteria(df.copy(), cup_pattern, asc_triangle, bull_flag)
+
+            if analysis:
+                analysis['symbol'] = symbol
+                analysis['cup_depth'] = round(cup_pattern['cup_depth_pct'], 1)
+                analysis['cup_days'] = cup_pattern['cup_length_days']
+                analysis['handle_pullback'] = round(cup_pattern['handle_decline_pct'], 1)
+                analysis['u_shape'] = cup_pattern['u_shape_score']
+                analysis['symmetry'] = cup_pattern['symmetry_pct']
+                analysis['asc_triangle'] = asc_triangle
+                analysis['bull_flag'] = bull_flag
+                analysis['pattern_count'] = pattern_count
+                
+                # Calculate DCF for stocks with patterns
+                dcf_result = calculate_dcf_value(symbol)
+                analysis['dcf_value'] = dcf_result.get('dcf_value')
+                analysis['margin_of_safety'] = dcf_result.get('margin')
+                
+                results.append(analysis)
+
+        except Exception as e:
+            # Silent fail for individual stocks
+            continue
+
+    print(f"Analysis complete. Found {len(results)} patterns.")
+    
+    # Sort by: status (best first), then score (highest first), then pattern count
+    status_order = {"STRONG BUY": 0, "BUY": 1, "FORMING - NEAR BREAKOUT": 2, "FORMING": 3, "WATCH": 4}
+    results.sort(key=lambda x: (status_order.get(x['status'], 5), -x['signal_score'], -x['pattern_count']))
+
+    return results
+
+
+# ════════════════════════════════════════════════════════════════
+# FLASK ROUTES
+# ════════════════════════════════════════════════════════════════
+
+@app.route("/")
+def home():
+    return render_template_string("""
+    <html>
+    <head>
+        <title>Cup & Handle Scanner V2</title>
+        <style>
+            body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; background: #1a1a2e; color: #eee; }
+            h1 { color: #00d4ff; }
+            .container { max-width: 1000px; margin: auto; }
+            .btn { padding: 15px 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                   color: white; text-decoration: none; border-radius: 8px; margin: 10px;
+                   display: inline-block; font-weight: bold; transition: transform 0.2s; }
+            .btn:hover { transform: scale(1.05); }
+            .btn-nasdaq { background: linear-gradient(135deg, #00c9ff 0%, #92fe9d 100%); color: #000; }
+            .btn-all { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+            .info { background: #16213e; padding: 20px; border-radius: 10px; margin: 20px 0; }
+            .info h3 { color: #00d4ff; margin-top: 0; }
+            ul { line-height: 1.8; }
+            .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+            .time-note { color: #888; font-size: 12px; margin-left: 10px; }
+            .new-badge { background: #00c853; color: #000; padding: 2px 8px; border-radius: 4px; 
+                        font-size: 10px; margin-left: 5px; }
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <h1>🏆 Cup & Handle Scanner V2 <span class="new-badge">ENHANCED</span></h1>
+        <p>Multi-pattern detection with DCF valuation and advanced charting.</p>
+
+        <div class="feature-grid">
+            <div class="info">
+                <h3>📊 Pattern Detection</h3>
+                <ul>
+                    <li><strong>Cup & Handle</strong> - Classic W. O'Neil pattern</li>
+                    <li><strong>Ascending Triangle</strong> - Flat resistance + rising support</li>
+                    <li><strong>Bull Flag</strong> - Strong pole + consolidation</li>
+                </ul>
+            </div>
+            <div class="info">
+                <h3>💰 DCF Valuation</h3>
+                <ul>
+                    <li><span style="color:#00c853">●</span> &gt;20% = Significantly Undervalued</li>
+                    <li><span style="color:#8bc34a">●</span> 0-20% = Undervalued</li>
+                    <li><span style="color:#ff9800">●</span> 0 to -20% = Fairly Valued</li>
+                    <li><span style="color:#f44336">●</span> &lt;-20% = Overvalued</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="info">
+            <h3>🎯 Breakout Criteria</h3>
+            <ul>
+                <li>Price above resistance • Volume spike (2x+) • Above SMA50 & SMA200</li>
+                <li>RSI 50-70 • MACD bullish • ADX &gt;25 • Handle volume contraction</li>
+                <li><span style="color: gold;">⭐ Golden Cross</span> = 50-day crosses above 200-day (bullish signal)</li>
+            </ul>
+        </div>
+
+        <div class="info">
+            <h3>📈 Moving Averages on Chart</h3>
+            <ul>
+                <li>SMA <span style="color: #ff6b6b;">13</span>, <span style="color: #ffd93d;">26</span>, <span style="color: #6bcb77;">40</span>, <span style="color: #4d96ff;">50</span>, <span style="color: #ff8c00;">200</span> day moving averages</li>
+                <li><span style="color: gold;">⭐</span> Golden Cross marked when 50 crosses above 200</li>
+            </ul>
+        </div>
+
+        <div class="info">
+            <h3>🔍 Search Individual Stock</h3>
+            <form action="/chart" method="get" style="display: flex; gap: 10px; align-items: center;">
+                <input type="text" name="symbol" placeholder="Enter symbol (e.g. AAPL)" 
+                       style="padding: 12px 15px; border-radius: 8px; border: none; font-size: 16px; 
+                              width: 250px; background: #16213e; color: #fff; border: 1px solid #667eea;">
+                <button type="submit" class="btn" style="margin: 0; border: none; cursor: pointer;">Analyze</button>
+            </form>
+        </div>
+
+        <div class="info">
+            <h3>🚀 Scan Market</h3>
+            <p>
+                <a class="btn" href="/scan?market=sp500">S&P 500</a>
+                <span class="time-note">~500 stocks, 5-10 min</span>
+            </p>
+            <p>
+                <a class="btn btn-nasdaq" href="/scan?market=nasdaq">NASDAQ ($1B+)</a>
+                <span class="time-note">~1000 stocks, 15-25 min</span>
+            </p>
+            <p>
+                <a class="btn btn-all" href="/scan?market=all">All US ($1B+)</a>
+                <span class="time-note">~2000 stocks, 30-45 min</span>
+            </p>
+        </div>
+    </div>
+    </body>
+    </html>
+    """)
+
+
+@app.route("/scan")
+def scan():
+    market = request.args.get('market', 'sp500')
+
+    if market == 'nasdaq':
+        tickers = get_nasdaq_tickers(min_market_cap=1_000_000_000)
+        market_name = "NASDAQ ($1B+)"
+    elif market == 'all':
+        tickers = get_all_us_tickers(min_market_cap=1_000_000_000)
+        market_name = "All US ($1B+)"
+    else:
+        tickers = get_sp500_tickers()
+        market_name = "S&P 500"
+
+    def progress(current, total, symbol):
+        if current % 50 == 0:
+            print(f"Progress: {current}/{total} ({symbol})")
+
+    print(f"Starting Cup & Handle V2 scan for {market_name} ({len(tickers)} stocks)...")
+    results = scan_for_patterns(tickers=tickers, progress_callback=progress)
+    print(f"Scan complete. Found {len(results)} patterns.")
+
+    html = """
+    <html>
+    <head>
+        <title>Cup & Handle V2 Scan Results</title>
+        <style>
+            body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }
+            h1 { color: #00d4ff; }
+            .container { max-width: 100%; margin: auto; overflow-x: auto; }
+            table { border-collapse: collapse; width: 100%; margin-top: 20px; font-size: 12px; }
+            th, td { border: 1px solid #333; padding: 8px; text-align: center; white-space: nowrap; }
+            th { background: #16213e; color: #00d4ff; position: sticky; top: 0; }
+            tr:nth-child(even) { background: #0f0f23; }
+            tr:hover { background: #1f1f3a; }
+            .strong-buy { background: #00c853 !important; color: #000; font-weight: bold; }
+            .buy { background: #4caf50 !important; color: #fff; font-weight: bold; }
+            .forming-near-breakout, .forming---near-breakout { background: #ff9800 !important; color: #000; font-weight: bold; }
+            .forming { background: #2196f3 !important; color: #fff; }
+            .watch { background: #607d8b !important; color: #fff; }
+            .check { color: #00c853; }
+            .cross { color: #f44336; }
+            .btn { padding: 8px 15px; background: #667eea; color: white; text-decoration: none;
+                   border-radius: 5px; margin: 5px; display: inline-block; }
+            .view-btn { padding: 4px 8px; background: #2196f3; color: white; text-decoration: none;
+                       border-radius: 4px; font-size: 11px; }
+            .dcf-green { color: #00c853; }
+            .dcf-lightgreen { color: #8bc34a; }
+            .dcf-orange { color: #ff9800; }
+            .dcf-red { color: #f44336; }
+            .pattern-badge { display: inline-block; padding: 2px 6px; border-radius: 3px; 
+                           font-size: 10px; margin: 1px; }
+            .badge-triangle { background: #9c27b0; color: white; }
+            .badge-flag { background: #e91e63; color: white; }
+            .badge-golden { background: gold; color: #000; }
+            .summary { background: #16213e; padding: 15px; border-radius: 8px; margin: 20px 0; }
+            .cup-analysis { font-size: 10px; line-height: 1.4; text-align: left; }
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <h1>🏆 Cup & Handle V2 Scan Results</h1>
+        <p><strong>Market:</strong> {{ market_name }} | <strong>Pattern:</strong> All Patterns | 
+           <strong>Scanned:</strong> {{ now }} | <strong>Found:</strong> {{ results|length }} patterns</p>
+
+        <div class="summary">
+            <strong>Status:</strong>
+            <span class="strong-buy" style="padding: 3px 8px; border-radius: 4px;">STRONG BUY (75+)</span>
+            <span class="buy" style="padding: 3px 8px; border-radius: 4px;">BUY (55+)</span>
+            <span class="forming-near-breakout" style="padding: 3px 8px; border-radius: 4px;">NEAR BREAKOUT</span>
+            <span class="forming" style="padding: 3px 8px; border-radius: 4px;">FORMING</span>
+            <span class="watch" style="padding: 3px 8px; border-radius: 4px;">WATCH</span>
+            <br><br>
+            <strong>Pattern Count:</strong> 3 = Cup&Handle + Triangle + Flag (Best) | 2 = Two patterns | 1 = Cup&Handle only
+            <br><br>
+            <strong>Additional Patterns:</strong> 
+            <span class="pattern-badge badge-triangle">Asc Triangle</span> = Flat resistance + rising support (R = resistance level)
+            <span class="pattern-badge badge-flag">Bull Flag/Pennant</span> = Strong pole + consolidation (% = pole gain)
+            <br><br>
+            <strong>Moving Averages:</strong> Chart shows SMA 13, 26, 40, 50, 200 day moving averages
+            <br>
+            <strong>Golden Cross:</strong> 
+            <span style="color: gold;">⭐ YES</span> = 50-day crossed above 200-day in last 20 days (bullish signal) |
+            <span style="color: #8bc34a;">50>200</span> = 50-day is above 200-day (bullish trend) |
+            <span style="color: #f44336;">☠️ Death</span> = 50-day crossed below 200-day (bearish signal)
+            <br><br>
+            <strong>DCF Valuation:</strong>
+            <span class="dcf-green">Green (&gt;20%)</span> = Significantly undervalued |
+            <span class="dcf-lightgreen">Light Green (0-20%)</span> = Undervalued |
+            <span class="dcf-orange">Orange (0 to -20%)</span> = Fairly valued |
+            <span class="dcf-red">Red (&lt;-20%)</span> = Overvalued |
+            -FCF = Negative cash flow (growth stock)
+        </div>
+
+        <p><a class="btn" href="/">Home</a> <a class="btn" href="/scan?market={{ market }}">Refresh</a></p>
+
+        {% if results %}
+        <table>
+            <tr>
+                <th>Symbol</th>
+                <th>Chart</th>
+                <th>Patterns</th>
+                <th>Asc Triangle</th>
+                <th>Bull Flag</th>
+                <th>Golden Cross</th>
+                <th>Status</th>
+                <th>Score</th>
+                <th>Price</th>
+                <th>Buy Point</th>
+                <th>Cup Analysis</th>
+                <th>Handle</th>
+                <th>RSI</th>
+                <th>ADX</th>
+                <th>Vol</th>
+                <th>SMA50</th>
+                <th>SMA200</th>
+                <th>MACD</th>
+                <th>Stop</th>
+                <th>Target</th>
+                <th>R:R</th>
+                <th>DCF Value</th>
+                <th>Margin of Safety</th>
+            </tr>
+            {% for r in results %}
+            <tr>
+                <td><strong>{{ r.symbol }}</strong></td>
+                <td><a class="view-btn" href="/chart/{{ r.symbol }}">View</a></td>
+                <td>{{ r.pattern_count }}</td>
+                <td>{% if r.asc_triangle %}<span class="pattern-badge badge-triangle">YES<br>R: ${{ r.asc_triangle.resistance }}</span>{% else %}-{% endif %}</td>
+                <td>{% if r.bull_flag %}<span class="pattern-badge badge-flag">FLAG<br>+{{ r.bull_flag.pole_gain|int }}%</span>{% else %}-{% endif %}</td>
+                <td>{% if r.golden_cross and r.golden_cross.golden_cross %}<span style="color: gold; font-weight: bold;">⭐ YES<br><span style="font-size:10px;">({{ r.golden_cross.days_since_golden }}d ago)</span></span>{% elif r.golden_cross and r.golden_cross.sma50_above_200 %}<span style="color: #8bc34a;">50>200</span>{% elif r.golden_cross and r.golden_cross.death_cross %}<span style="color: #f44336;">☠️ Death<br><span style="font-size:10px;">({{ r.golden_cross.days_since_death }}d ago)</span></span>{% else %}<span style="color: #888;">-</span>{% endif %}</td>
+                <td class="{{ r.status.lower().replace(' ', '-') }}">{{ r.status }}</td>
+                <td>{{ r.signal_score }}</td>
+                <td>${{ r.current_price }}</td>
+                <td>${{ r.buy_point }}</td>
+                <td class="cup-analysis">Depth: {{ r.cup_depth }}% / {{ r.cup_days }}d<br>U-shape: {{ r.u_shape }}<br>Symmetry: {{ r.symmetry }}%</td>
+                <td>{{ r.handle_pullback }}%</td>
+                <td>{{ r.rsi if r.rsi else '-' }}</td>
+                <td>{{ r.adx if r.adx else '-' }}</td>
+                <td>{{ r.volume_ratio }}x</td>
+                <td class="{{ 'check' if r.criteria.above_sma50.passed else 'cross' }}">{{ '✔' if r.criteria.above_sma50.passed else '✘' }}</td>
+                <td class="{{ 'check' if r.criteria.above_sma200.passed else 'cross' }}">{{ '✔' if r.criteria.above_sma200.passed else '✘' }}</td>
+                <td class="{{ 'check' if r.criteria.macd_bullish.passed else 'cross' }}">{{ '✔' if r.criteria.macd_bullish.passed else '✘' }}</td>
+                <td>${{ r.stop_loss }}</td>
+                <td>${{ r.target }}</td>
+                <td>{{ r.rr_ratio }}:1</td>
+                <td class="{% if r.dcf_value == '-FCF' %}dcf-orange{% elif r.margin_of_safety and r.margin_of_safety > 20 %}dcf-green{% elif r.margin_of_safety and r.margin_of_safety > 0 %}dcf-lightgreen{% elif r.margin_of_safety and r.margin_of_safety > -20 %}dcf-orange{% elif r.margin_of_safety %}dcf-red{% endif %}">
+                    {% if r.dcf_value == '-FCF' %}-FCF{% elif r.dcf_value %}${{ r.dcf_value }}{% else %}-{% endif %}
+                </td>
+                <td class="{% if r.margin_of_safety and r.margin_of_safety > 20 %}dcf-green{% elif r.margin_of_safety and r.margin_of_safety > 0 %}dcf-lightgreen{% elif r.margin_of_safety and r.margin_of_safety > -20 %}dcf-orange{% elif r.margin_of_safety %}dcf-red{% endif %}">
+                    {% if r.dcf_value == '-FCF' %}N/A{% elif r.margin_of_safety %}{{ r.margin_of_safety }}%{% else %}-{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p style="color: #ff9800; font-size: 18px;">No cup & handle patterns found in current scan.</p>
+        {% endif %}
+    </div>
+    </body>
+    </html>
+    """
+
+    return render_template_string(html, results=results, now=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                                   market=market, market_name=market_name)
+
+
+@app.route("/chart")
+def chart_search():
+    """Handle search form - redirect to chart page."""
+    symbol = request.args.get('symbol', '').strip().upper()
+    if not symbol:
+        return "Please enter a stock symbol", 400
+    from flask import redirect
+    return redirect(f"/chart/{symbol}")
+
+
+@app.route("/chart/<symbol>")
+def chart(symbol):
+    """Generate detailed chart view with all info."""
+    try:
+        # Parse SMA parameter: ?sma=50,200 or ?sma=all or ?sma=none
+        sma_param = request.args.get('sma', '50,200')
+        if sma_param.lower() == 'all':
+            show_smas = [13, 26, 40, 50, 200]
+        elif sma_param.lower() == 'none':
+            show_smas = []
+        else:
+            try:
+                show_smas = [int(x.strip()) for x in sma_param.split(',') if x.strip()]
+            except:
+                show_smas = [50, 200]
+        
+        ticker = yf.Ticker(symbol)
+        try:
+            # Fetch enough data so 200 SMA covers the full displayed period
+            # Need: 252 (display) + 200 (SMA warmup) = 452 days minimum
+            # Request 500 days to be safe
+            from datetime import datetime, timedelta
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=700)  # ~500 trading days
+            df_full = ticker.history(start=start_date, end=end_date)
+        except Exception as hist_err:
+            return f"Error fetching history for {symbol}: {hist_err}"
+        
+        if df_full is None or df_full.empty:
+            return f"No data available for {symbol}"
+        
+        # Calculate SMAs on full data first (before trimming)
+        df_full['SMA13'] = df_full['Close'].rolling(13).mean()
+        df_full['SMA26'] = df_full['Close'].rolling(26).mean()
+        df_full['SMA40'] = df_full['Close'].rolling(40).mean()
+        df_full['SMA50'] = df_full['Close'].rolling(50).mean()
+        df_full['SMA200'] = df_full['Close'].rolling(200).mean()
+        
+        # Trim to ~1 year for display (SMAs are pre-calculated so 200 SMA has full coverage)
+        display_days = 252  # ~1 year of trading days
+        
+        # Make sure we have enough data for SMA200 to cover display period
+        min_required = display_days + 200
+        if len(df_full) >= min_required:
+            df = df_full.tail(display_days).copy()
+        elif len(df_full) > display_days:
+            # Not enough for full SMA200, but take what we can
+            df = df_full.tail(display_days).copy()
+        else:
+            df = df_full.copy()
+        
+        # Get all data - detect patterns on the DISPLAY data so indices match
+        company_info = get_company_info(symbol)
+        cup_pattern = detect_cup_and_handle(df)
+        asc_triangle = detect_ascending_triangle(df)
+        bull_flag = detect_bull_flag(df)
+        dcf_data = calculate_dcf_value(symbol)
+        social = get_social_sentiment(symbol)
+        
+        # Get analysis
+        analysis = None
+        buy_point = None
+        if cup_pattern:
+            analysis = check_breakout_criteria(df.copy(), cup_pattern, asc_triangle, bull_flag)
+            buy_point = analysis['buy_point'] if analysis else None
+        
+        # Generate unified chart with SMA toggle
+        # Pass df which now has pre-calculated SMAs
+        chart_base64 = generate_unified_chart(symbol, df, cup_pattern, asc_triangle, bull_flag, buy_point, show_smas=show_smas)
+        
+        html = """
+        <html>
+        <head>
+            <title>{{ symbol }} - {{ company.name }} | Pattern Analysis</title>
+            <style>
+                body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }
+                h1, h2, h3 { color: #00d4ff; }
+                .container { max-width: 1400px; margin: auto; }
+                .btn { padding: 10px 20px; background: #667eea; color: white; text-decoration: none;
+                       border-radius: 5px; margin: 5px; display: inline-block; }
+                img { max-width: 100%; border-radius: 10px; margin: 20px 0; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+                
+                .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin: 20px 0; }
+                .card { background: #16213e; padding: 20px; border-radius: 10px; }
+                .card h3 { margin-top: 0; border-bottom: 1px solid #333; padding-bottom: 10px; }
+                
+                table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+                td, th { padding: 8px 12px; text-align: left; border-bottom: 1px solid #333; }
+                th { color: #888; font-weight: normal; width: 40%; }
+                
+                .pass { color: #00c853; font-weight: bold; }
+                .fail { color: #f44336; }
+                .detected { color: #00c853; font-weight: bold; }
+                .not-found { color: #888; }
+                
+                .company-header { display: flex; align-items: center; gap: 20px; margin-bottom: 20px; }
+                .company-header h1 { margin: 0; }
+                .company-meta { color: #888; font-size: 14px; }
+                
+                .description { background: #0f0f23; padding: 15px; border-radius: 8px; line-height: 1.6; 
+                              max-height: 150px; overflow-y: auto; font-size: 14px; }
+                
+                .dcf-green { color: #00c853; }
+                .dcf-lightgreen { color: #8bc34a; }
+                .dcf-orange { color: #ff9800; }
+                .dcf-red { color: #f44336; }
+                
+                .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; 
+                        font-weight: bold; margin: 2px; }
+                .badge-triangle { background: #9c27b0; color: white; }
+                .badge-flag { background: #e91e63; color: white; }
+                .badge-cup { background: #00c853; color: white; }
+                
+                .chart-legend { background: #0f0f23; padding: 10px 15px; border-radius: 8px; margin-top: 10px;
+                               font-size: 12px; display: flex; gap: 20px; flex-wrap: wrap; }
+                .legend-item { display: flex; align-items: center; gap: 5px; }
+                .legend-color { width: 20px; height: 3px; }
+            </style>
+        </head>
+        <body>
+        <div class="container">
+            <p><a class="btn" href="javascript:history.back()">← Back to Results</a> 
+               <a class="btn" href="/">Home</a></p>
+            
+            <!-- Company Header -->
+            <div class="company-header">
+                <div>
+                    <h1>{{ symbol }} - {{ company.name }}</h1>
+                    <div class="company-meta">
+                        {{ company.exchange }} | {{ company.sector }} | {{ company.industry }} | 
+                        Market Cap: {{ company.market_cap_fmt }}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- SMA Toggle Controls -->
+            <div class="card" style="margin-bottom: 15px; padding: 15px;">
+                <strong>📈 Moving Averages:</strong>
+                <a class="btn" style="padding: 5px 12px; font-size: 12px; {% if show_smas == [50, 200] %}background: #00c853;{% endif %}" 
+                   href="/chart/{{ symbol }}?sma=50,200">50 & 200</a>
+                <a class="btn" style="padding: 5px 12px; font-size: 12px; {% if 13 in show_smas and 26 in show_smas %}background: #00c853;{% endif %}" 
+                   href="/chart/{{ symbol }}?sma=all">All (13,26,40,50,200)</a>
+                <a class="btn" style="padding: 5px 12px; font-size: 12px;" 
+                   href="/chart/{{ symbol }}?sma=13,26,50">Short-term (13,26,50)</a>
+                <a class="btn" style="padding: 5px 12px; font-size: 12px;" 
+                   href="/chart/{{ symbol }}?sma=none">None</a>
+                <span style="color: #888; font-size: 12px; margin-left: 10px;">
+                    Currently showing: {% if show_smas %}{{ show_smas|join(', ') }}{% else %}None{% endif %}
+                </span>
+            </div>
+            
+            <!-- Chart -->
+            <img src="data:image/png;base64,{{ chart }}" alt="{{ symbol }} Chart">
+            
+            <div class="chart-legend">
+                <div class="legend-item"><div class="legend-color" style="background: cyan;"></div> Price</div>
+                {% if 13 in show_smas %}<div class="legend-item"><div class="legend-color" style="background: #ff6b6b;"></div> SMA 13</div>{% endif %}
+                {% if 26 in show_smas %}<div class="legend-item"><div class="legend-color" style="background: #ffd93d;"></div> SMA 26</div>{% endif %}
+                {% if 40 in show_smas %}<div class="legend-item"><div class="legend-color" style="background: #6bcb77;"></div> SMA 40</div>{% endif %}
+                {% if 50 in show_smas %}<div class="legend-item"><div class="legend-color" style="background: #4d96ff;"></div> SMA 50</div>{% endif %}
+                {% if 200 in show_smas %}<div class="legend-item"><div class="legend-color" style="background: #ff8c00;"></div> SMA 200</div>{% endif %}
+                {% if 50 in show_smas and 200 in show_smas %}<div class="legend-item"><div class="legend-color" style="background: gold;"></div> ⭐ Golden Cross (50>200)</div>{% endif %}
+                <div class="legend-item"><div class="legend-color" style="background: lime;"></div> Cup & Handle</div>
+                <div class="legend-item"><div class="legend-color" style="background: magenta;"></div> Ascending Triangle</div>
+                <div class="legend-item"><div class="legend-color" style="background: #ff9800;"></div> Bull Flag</div>
+                <div class="legend-item"><div class="legend-color" style="background: #00ff00; height: 3px;"></div> Buy Point</div>
+            </div>
+            
+            <div class="grid">
+                <!-- Breakout Criteria -->
+                <div class="card">
+                    <h3>📊 Breakout Criteria</h3>
+                    {% if analysis %}
+                    <table>
+                        <tr>
+                            <th>Above SMA 50</th>
+                            <td class="{{ 'pass' if analysis.criteria.above_sma50.passed else 'fail' }}">
+                                {{ 'Yes' if analysis.criteria.above_sma50.passed else 'No' }}
+                                <span style="color:#888; font-size:12px;">({{ analysis.criteria.above_sma50.value }})</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Above SMA 200</th>
+                            <td class="{{ 'pass' if analysis.criteria.above_sma200.passed else 'fail' }}">
+                                {{ 'Yes' if analysis.criteria.above_sma200.passed else 'No' }}
+                                <span style="color:#888; font-size:12px;">({{ analysis.criteria.above_sma200.value }})</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Volume Spike</th>
+                            <td class="{{ 'pass' if analysis.criteria.volume_spike.passed else 'fail' }}">
+                                {{ analysis.criteria.volume_spike.value }} {{ analysis.criteria.volume_spike.requirement }}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Handle Vol Contraction</th>
+                            <td class="{{ 'pass' if analysis.criteria.handle_vol_contraction.passed else 'fail' }}">
+                                {{ analysis.criteria.handle_vol_contraction.value }}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>MACD Bullish</th>
+                            <td class="{{ 'pass' if analysis.criteria.macd_bullish.passed else 'fail' }}">
+                                {{ 'Yes' if analysis.criteria.macd_bullish.passed else 'No' }}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>ADX Strong (>25)</th>
+                            <td class="{{ 'pass' if analysis.criteria.adx_strong.passed else 'fail' }}">
+                                {{ 'Yes' if analysis.criteria.adx_strong.passed else 'No' }}
+                                <span style="color:#888; font-size:12px;">({{ analysis.criteria.adx_strong.value }})</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>RSI Healthy (50-70)</th>
+                            <td class="{{ 'pass' if analysis.criteria.rsi_healthy.passed else 'fail' }}">
+                                {{ 'Yes' if analysis.criteria.rsi_healthy.passed else 'No' }}
+                                <span style="color:#888; font-size:12px;">({{ analysis.criteria.rsi_healthy.value }})</span>
+                            </td>
+                        </tr>
+                    </table>
+                    {% else %}
+                    <p>Analysis not available</p>
+                    {% endif %}
+                </div>
+                
+                <!-- Pattern Detection -->
+                <div class="card">
+                    <h3>🔍 Additional Pattern Detection</h3>
+                    <table>
+                        <tr>
+                            <th>Cup & Handle</th>
+                            <td>
+                                {% if cup_pattern %}
+                                <span class="detected">DETECTED</span>
+                                <span class="badge badge-cup">✓</span>
+                                {% else %}
+                                <span class="not-found">Not Found</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Ascending Triangle</th>
+                            <td>
+                                {% if asc_triangle %}
+                                <span class="detected">DETECTED</span>
+                                <span class="badge badge-triangle">△</span><br>
+                                <span style="color:#888; font-size:12px;">
+                                    Resistance: ${{ asc_triangle.resistance }}<br>
+                                    Target: ${{ asc_triangle.target }}
+                                </span>
+                                {% else %}
+                                <span class="not-found">Not Found</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Bull Flag/Pennant</th>
+                            <td>
+                                {% if bull_flag %}
+                                <span class="detected">DETECTED</span>
+                                <span class="badge badge-flag">⚑</span><br>
+                                <span style="color:#888; font-size:12px;">
+                                    Pole: +{{ bull_flag.pole_gain }}%<br>
+                                    Target: ${{ bull_flag.target }}
+                                </span>
+                                {% else %}
+                                <span class="not-found">Not Found</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Golden Cross (50>200)</th>
+                            <td>
+                                {% if analysis and analysis.golden_cross and analysis.golden_cross.golden_cross %}
+                                <span style="color: gold; font-weight: bold;">⭐ DETECTED</span><br>
+                                <span style="color:#888; font-size:12px;">
+                                    {{ analysis.golden_cross.days_since_golden }} days ago
+                                </span>
+                                {% elif analysis and analysis.golden_cross and analysis.golden_cross.sma50_above_200 %}
+                                <span style="color: #8bc34a;">50 > 200 (Bullish)</span>
+                                {% elif analysis and analysis.golden_cross and analysis.golden_cross.death_cross %}
+                                <span style="color: #f44336;">☠️ Death Cross</span><br>
+                                <span style="color:#888; font-size:12px;">
+                                    {{ analysis.golden_cross.days_since_death }} days ago
+                                </span>
+                                {% elif analysis and analysis.golden_cross %}
+                                <span style="color: #f44336;">50 < 200 (Bearish)</span>
+                                {% else %}
+                                <span class="not-found">N/A</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </table>
+                    <p style="color:#888; font-size:11px; margin-top:15px;">
+                        Patterns are drawn on the chart if detected<br>
+                        (pink = triangle, orange = flag, gold star = golden cross)
+                    </p>
+                </div>
+                
+                <!-- Cup & Handle Details -->
+                <div class="card">
+                    <h3>🏆 Cup & Handle Formation</h3>
+                    {% if cup_pattern %}
+                    <table>
+                        <tr><th>Cup Depth</th><td>{{ cup_pattern.cup_depth_pct|round(1) }}%</td></tr>
+                        <tr><th>Cup Duration</th><td>{{ cup_pattern.cup_length_days }} days</td></tr>
+                        <tr><th>Left Rim</th><td>${{ cup_pattern.left_rim_price|round(2) }}</td></tr>
+                        <tr><th>Right Rim</th><td>${{ cup_pattern.right_rim_price|round(2) }}</td></tr>
+                        <tr><th>Cup Bottom</th><td>${{ cup_pattern.bottom_price|round(2) }}</td></tr>
+                        <tr><th>U-Shape Score</th><td>{{ cup_pattern.u_shape_score }} (1.0 = perfect U)</td></tr>
+                        <tr><th>Symmetry</th><td>{{ cup_pattern.symmetry_pct }}%</td></tr>
+                        <tr><th>Handle Pullback</th><td>{{ cup_pattern.handle_decline_pct|round(1) }}%</td></tr>
+                        <tr><th>Handle Days</th><td>{{ cup_pattern.handle_days }}</td></tr>
+                    </table>
+                    {% if analysis %}
+                    <table style="margin-top:15px; border-top: 2px solid #00d4ff;">
+                        <tr><th>Buy Point</th><td style="color:#00ff00; font-weight:bold;">${{ analysis.buy_point }}</td></tr>
+                        <tr><th>Stop Loss</th><td style="color:#f44336;">${{ analysis.stop_loss }}</td></tr>
+                        <tr><th>Target</th><td style="color:#00c853;">${{ analysis.target }}</td></tr>
+                        <tr><th>Risk:Reward</th><td>{{ analysis.rr_ratio }}:1</td></tr>
+                    </table>
+                    {% endif %}
+                    {% else %}
+                    <p>Cup & Handle pattern not detected</p>
+                    {% endif %}
+                </div>
+                
+                <!-- DCF Valuation -->
+                <div class="card">
+                    <h3>💰 DCF Valuation</h3>
+                    {% if dcf_data.status == 'success' %}
+                    <table>
+                        <tr><th>Intrinsic Value</th>
+                            <td class="{% if dcf_data.margin and dcf_data.margin > 20 %}dcf-green{% elif dcf_data.margin and dcf_data.margin > 0 %}dcf-lightgreen{% elif dcf_data.margin and dcf_data.margin > -20 %}dcf-orange{% else %}dcf-red{% endif %}" style="font-size:18px; font-weight:bold;">
+                                ${{ dcf_data.dcf_value }}
+                            </td>
+                        </tr>
+                        <tr><th>Current Price</th><td>${{ dcf_data.current_price }}</td></tr>
+                        <tr><th>Margin of Safety</th>
+                            <td class="{% if dcf_data.margin and dcf_data.margin > 20 %}dcf-green{% elif dcf_data.margin and dcf_data.margin > 0 %}dcf-lightgreen{% elif dcf_data.margin and dcf_data.margin > -20 %}dcf-orange{% else %}dcf-red{% endif %}">
+                                {{ dcf_data.margin }}%
+                                {% if dcf_data.margin and dcf_data.margin > 20 %}(Undervalued 🟢)
+                                {% elif dcf_data.margin and dcf_data.margin > 0 %}(Slightly Undervalued)
+                                {% elif dcf_data.margin and dcf_data.margin > -20 %}(Fairly Valued 🟡)
+                                {% else %}(Overvalued 🔴){% endif %}
+                            </td>
+                        </tr>
+                        <tr><th>Free Cash Flow</th><td>{{ dcf_data.fcf_fmt }}</td></tr>
+                        <tr><th>Growth Rate (5yr)</th><td>{{ dcf_data.growth_rate }}%</td></tr>
+                        <tr><th>Discount Rate</th><td>{{ dcf_data.discount_rate }}%</td></tr>
+                        <tr><th>Terminal Growth</th><td>{{ dcf_data.terminal_growth }}%</td></tr>
+                    </table>
+                    {% elif dcf_data.status == 'negative_fcf' %}
+                    <p style="color:#ff9800;">⚠️ Negative Free Cash Flow</p>
+                    <p style="color:#888; font-size:13px;">This is common for growth companies reinvesting heavily. DCF not applicable.</p>
+                    {% else %}
+                    <p style="color:#888;">DCF data not available</p>
+                    {% endif %}
+                </div>
+                
+                <!-- Social Sentiment -->
+                <div class="card">
+                    <h3>📱 Social Media & News</h3>
+                    <table>
+                        <tr><th>Reddit Mentions (7d)</th><td>{{ social.reddit_mentions }} posts</td></tr>
+                        <tr><th>Reddit Sentiment</th><td>{{ social.reddit_sentiment }}</td></tr>
+                        <tr><th>StockTwits</th><td>{{ social.stocktwits_sentiment }}</td></tr>
+                        <tr><th>News Sentiment</th><td>{{ social.news_sentiment }}</td></tr>
+                    </table>
+                    <p style="color:#888; font-size:11px; margin-top:10px;">
+                        Social data is indicative only. Always do your own research.
+                    </p>
+                </div>
+                
+                <!-- Company Info -->
+                <div class="card">
+                    <h3>🏢 Company Overview</h3>
+                    <table>
+                        <tr><th>Sector</th><td>{{ company.sector }}</td></tr>
+                        <tr><th>Industry</th><td>{{ company.industry }}</td></tr>
+                        <tr><th>Market Cap</th><td>{{ company.market_cap_fmt }}</td></tr>
+                        <tr><th>Employees</th><td>{{ company.employees }}</td></tr>
+                        <tr><th>Country</th><td>{{ company.country }}</td></tr>
+                        {% if company.pe_ratio %}<tr><th>P/E Ratio</th><td>{{ company.pe_ratio|round(1) }}</td></tr>{% endif %}
+                        {% if company.forward_pe %}<tr><th>Forward P/E</th><td>{{ company.forward_pe|round(1) }}</td></tr>{% endif %}
+                        {% if company.beta %}<tr><th>Beta</th><td>{{ company.beta|round(2) }}</td></tr>{% endif %}
+                        <tr><th>52-Week Range</th><td>${{ company.fifty_two_week_low|round(2) }} - ${{ company.fifty_two_week_high|round(2) }}</td></tr>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Business Description -->
+            <div class="card" style="margin-top: 20px;">
+                <h3>📝 Business Description</h3>
+                <div class="description">{{ company.description }}</div>
+            </div>
+            
+        </div>
+        </body>
+        </html>
+        """
+        
+        return render_template_string(html, 
+                                      symbol=symbol, 
+                                      chart=chart_base64,
+                                      company=company_info,
+                                      cup_pattern=cup_pattern, 
+                                      asc_triangle=asc_triangle, 
+                                      bull_flag=bull_flag,
+                                      analysis=analysis,
+                                      dcf_data=dcf_data,
+                                      social=social,
+                                      show_smas=show_smas)
+    
+    except Exception as e:
+        import traceback
+        return f"Error generating chart for {symbol}: {e}<br><pre>{traceback.format_exc()}</pre>"
+
+
+if __name__ == "__main__":
+    print("Starting Cup & Handle Scanner V2 (Enhanced)...")
+    print("Open http://127.0.0.1:5002 in your browser")
+    # Disable reloader to prevent crashes during long scans
+    app.run(debug=True, host="0.0.0.0", port=5002, use_reloader=False)
