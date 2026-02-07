@@ -28,6 +28,16 @@ A powerful stock pattern scanner that detects Cup & Handle, Ascending Triangle, 
 - **Risk/Reward Calculation** — Buy point, stop loss, and target prices
 - **Signal Scoring** — 0-100 composite score for entry quality
 
+### 📈 Options Strategy: Bull Call Spread (NEW!)
+- **Automated Trade Suggestions** — When viewing any stock chart, get a ready-to-execute Bull Call Spread recommendation
+- **Smart Strike Selection** — Automatically selects ATM/ITM call to buy and 5-10% OTM call to sell
+- **45-90 Day Expirations** — Filters for optimal time decay balance
+- **Position Sizing** — Calculates contracts based on your budget ($150-$1000)
+- **Complete P/L Analysis** — Breakeven, max gain, max loss, and R/R ratio
+- **Exit Rules** — 50%/100% profit targets, stop loss, and time-based exit
+- **IV Assessment** — Evaluates implied volatility and adjusts recommendations
+- **Signal Integration** — Ties into pattern strength for STRONG/MODERATE/SPECULATIVE signals
+
 ### Market Scanning
 - **S&P 500** — Scan all 500 large-cap stocks
 - **NASDAQ** — All NASDAQ stocks with $1B+ market cap
@@ -129,6 +139,48 @@ Click "Scan S&P 500", "Scan NASDAQ", or "Scan All US" to:
 | 70+ | STRONG BUY |
 | 50-69 | BUY |
 | < 50 | WATCH / FORMING |
+
+## 📈 Options Strategy: Bull Call Spread
+
+When viewing any stock's chart (e.g., `/chart/AAPL`), you'll see a Bull Call Spread recommendation designed for bullish patterns with less capital and built-in risk management.
+
+### Why Bull Call Spreads?
+- **Lower cost** than buying shares or naked calls (typically 30-50% less)
+- **Defined risk** — max loss is capped at the net debit paid
+- **Reduced IV exposure** — spread structure minimizes implied volatility crush
+- **Works well with patterns** — complements cup & handle, bull flag, and ascending triangle setups
+
+### Trade Parameters
+
+| Parameter | Target | Rationale |
+|-----------|--------|-----------|
+| **Expiration** | 45-90 days | Time for pattern to resolve without excessive theta decay |
+| **Buy Strike** | ATM to 2% ITM | Delta ~0.55-0.70 for moderate moves |
+| **Sell Strike** | 5-10% OTM | Delta ~0.30-0.40 to finance the trade |
+| **Budget** | $150-$1000 | Adjustable via URL parameter `?budget=500` |
+| **Contracts** | 1-3 max | Scaled to budget |
+
+### Exit Rules (Built In)
+
+| Rule | Target |
+|------|--------|
+| **50% Profit** | Close at 1.5x net debit |
+| **100% Profit** | Close at 2x net debit |
+| **Stop Loss** | Close at 50% of net debit |
+| **Pattern Stop** | Close if stock drops below handle low |
+| **Time Stop** | Exit 21 days before expiration |
+
+### Signal Strength Integration
+
+| Pattern Score | Options Recommendation |
+|---------------|------------------------|
+| 75+ | STRONG — Full position (2-3 contracts) |
+| 55-74 | MODERATE — Conservative (1-2 contracts) |
+| < 55 | SPECULATIVE — 1 contract only |
+
+### Extended Stock Warning
+
+When breakeven requires >5% move, you'll see a warning suggesting to wait for a pullback to the handle before entering.
 
 ## 🔌 API Reference
 
